@@ -10,6 +10,13 @@
 #define TIME_SLICE_MS 500
 
 /*
+ * Intervalo entre reforços periódicos de prioridade no MLFQ.
+ * A cada 5 segundos, os processos de Q1 e Q2 regressam a Q0,
+ * reduzindo o risco de starvation.
+ */
+#define MLFQ_BOOST_INTERVAL_MS 5000
+
+/*
  * Algoritmos de escalonamento suportados pelo simulador.
  */
 typedef enum {

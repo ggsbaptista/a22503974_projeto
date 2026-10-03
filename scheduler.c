@@ -14,6 +14,11 @@ static const char *SCHED_NAMES[] = { "FIFO", "SJF", "RR", "MLFQ", NULL };
 static sched_algo_en sched_algo = SCHED_FIFO;
 
 /*
+ * Guarda o instante do último reforço periódico de prioridade do MLFQ.
+ */
+static uint32_t last_mlfq_boost_ms = 0;
+
+/*
  * Seleciona o algoritmo recebido através do parâmetro --sched.
  * A comparação não distingue maiúsculas de minúsculas.
  */
@@ -75,6 +80,20 @@ static void finish_burst(uint32_t current_time_ms, queue_t *cq, pcb_t *task) {
  *       Q1 -> Q2
  *       Q2 -> Q2
  */
+
+/*
+ * Move todos os processos de uma fila MLFQ para Q0.
+ * O nível lógico do PCB também é atualizado para 0.
+ */
+static void promote_queue_to_q0(queue_t *source, queue_t *mlfq_high) {
+    pcb_t *task;
+
+    while ((task = dequeue_pcb(source)) != NULL) {
+        task->mlfq_level = 0;
+        enqueue_pcb(mlfq_high, task);
+    }
+}
+
 int scheduler(
     uint32_t current_time_ms,
     queue_t *rq,
@@ -90,6 +109,33 @@ int scheduler(
      * no tempo de CPU já executado durante o burst atual.
      */
     if (*cpu_task) {
+        /*
+ * Reforço periódico de prioridade do MLFQ.
+ *
+ * A cada MLFQ_BOOST_INTERVAL_MS, todos os processos que se encontram
+ * em Q1 ou Q2 regressam a Q0. Isto reduz o risco de starvation dos
+ * processos que perderam prioridade por consumirem vários quantums.
+ */
+        if (sched_algo == SCHED_MLFQ &&
+            current_time_ms - last_mlfq_boost_ms >= MLFQ_BOOST_INTERVAL_MS) {
+
+            promote_queue_to_q0(mlfq_mid, mlfq_high);
+            promote_queue_to_q0(mlfq_low, mlfq_high);
+
+            /*
+             * Se existir atualmente um processo no CPU, o seu nível lógico
+             * também é reposto para Q0. O processo não é interrompido:
+             * continua a executar até terminar o burst ou o quantum atual.
+             */
+            if (*cpu_task != NULL) {
+                (*cpu_task)->mlfq_level = 0;
+            }
+
+            printf("Time [ms]: %d\tMLFQ BOOST - processos promovidos para Q0\n",
+                   current_time_ms);
+
+            last_mlfq_boost_ms = current_time_ms;
+            }
         (*cpu_task)->ellapsed_time_ms += TICKS_MS;
 
         /*
